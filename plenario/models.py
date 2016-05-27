@@ -222,9 +222,9 @@ class MetaTable(Base):
 
         threads = []
         timeseries_dicts = []
-        _session = session()
 
         def fetch_timeseries(t_name):
+            _session = session()
             # fetch MetaTable object associated with t_name
             table = _session.query(cls).filter(cls.dataset_name == t_name).first()
             # get ResultProxy returned by executing MetaTable.timeseries query
@@ -247,6 +247,7 @@ class MetaTable(Base):
                 timeseries_dicts.append(timeseries)
 
             rp.close()
+            _session.close()
 
         # create a new thread for every table to query
         for name in table_names:
