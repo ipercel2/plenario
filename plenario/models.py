@@ -2,11 +2,12 @@ from uuid import uuid4
 from datetime import datetime
 
 from sqlalchemy import Column, String, Boolean, Date, DateTime, \
-    Text, func, Table, select, Integer
+    Text, func, Table, select, Integer, create_engine
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import ARRAY
 from geoalchemy2 import Geometry
-from sqlalchemy.orm import synonym
+from sqlalchemy.orm import scoped_session, sessionmaker, synonym
+from sqlalchemy.pool import QueuePool
 import sqlalchemy as sa
 from plenario.utils.helpers import get_size_in_degrees
 from flask_bcrypt import Bcrypt
@@ -223,15 +224,17 @@ class MetaTable(Base):
         threads = []
         timeseries_dicts = []
 
-        def fetch_timeseries(t_name):
-            _session = session()
-            # fetch MetaTable object associated with t_name
-            table = _session.query(cls).filter(cls.dataset_name == t_name).first()
-            # get ResultProxy returned by executing MetaTable.timeseries query
-            rp = _session.execute(table.timeseries(agg_unit, start, end, geom))
+        engine = create_engine(DATABASE_CONN, poolclass=QueuePool, pool_size=0, max_overflow=0, pool_timeout=90)
+        scoped_sessionmaker = scoped_session(sessionmaker(bind=engine))
 
-            # ignore empty ResultProxies
-            if rp.rowcount > 0:
+        def fetch_timeseries(t_name):
+            _session = scoped_sessionmaker()
+            # extract information for specified table as a list of lists
+            table = MetaTable.get_by_dataset_name(t_name)
+            results = table.timeseries_one(agg_unit, start, end, geom)
+
+            # empty results will just have a header
+            if len(results) > 1:
 
                 timeseries = {
                     'dataset_name': t_name,
@@ -239,15 +242,16 @@ class MetaTable(Base):
                     'count': 0
                 }
 
-                for row in rp.fetchall():
-                    timeseries['items'].append({'datetime': row.time_bucket.date(), 'count': row.count})
-                    timeseries['count'] += row.count
+                for i in xrange(1, len(results)):
+                    timeseries['items'].append({'count': results[i][0], 'datetime': results[i][1]})
+                    timeseries['count'] += results[i][0]
 
                 # load to outer storage
                 timeseries_dicts.append(timeseries)
 
-            rp.close()
+            # clean up session
             _session.close()
+            scoped_sessionmaker.remove()
 
         # create a new thread for every table to query
         for name in table_names:
@@ -261,6 +265,9 @@ class MetaTable(Base):
         # wait for all threads to finish
         for thread in threads:
             thread.join()
+
+        # release all connections associated with this engine
+        engine.dispose()
 
         return timeseries_dicts
 
