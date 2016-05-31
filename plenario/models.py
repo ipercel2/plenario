@@ -1,5 +1,5 @@
 import json
-import sqlalchemy as sa
+import sqlalchemy
 import threading
 
 from collections import namedtuple
@@ -18,7 +18,6 @@ from sqlalchemy import Column, String, Boolean, Date, DateTime,  Integer, Table,
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import scoped_session, sessionmaker, synonym
-from sqlalchemy.pool import QueuePool, SingletonThreadPool
 
 from geoalchemy2 import Geometry
 
@@ -223,7 +222,7 @@ class MetaTable(Base):
         timeseries_dicts = []
 
         # set up engine for use with threading
-        psql_db = create_engine(DATABASE_CONN, pool_size=1000, echo_pool='debug')
+        psql_db = create_engine(DATABASE_CONN, pool_size=10, max_overflow=-1, pool_timeout=100)
         scoped_sessionmaker = scoped_session(sessionmaker(bind=psql_db, autoflush=True, autocommit=True))
 
         def fetch_timeseries(t_name):
@@ -369,7 +368,7 @@ class MetaTable(Base):
         day_generator = func.generate_series(func.date_trunc(agg_unit, start),
                                              func.date_trunc(agg_unit, end),
                                              step)
-        defaults = select([sa.literal_column("0").label('count'),
+        defaults = select([sqlalchemy.literal_column("0").label('count'),
                            day_generator.label('time_bucket')])\
             .alias('defaults')
 
@@ -384,7 +383,7 @@ class MetaTable(Base):
         actuals = select([func.count(t.c.hash).label('count'),
                           func.date_trunc(agg_unit, t.c.point_date).
                          label('time_bucket')])\
-            .where(sa.and_(*where_filters))\
+            .where(sqlalchemy.and_(*where_filters))\
             .group_by('time_bucket')
 
         # Also filter by geometry if requested
@@ -398,7 +397,7 @@ class MetaTable(Base):
         # Outer join the default and observed values
         # to create the timeseries select statement.
         # If no observed value in a bucket, use the default.
-        name = sa.literal_column("'{}'".format(self.dataset_name))\
+        name = sqlalchemy.literal_column("'{}'".format(self.dataset_name))\
             .label('dataset_name')
         bucket = defaults.c.time_bucket.label('time_bucket')
         count = func.coalesce(actuals.c.count, defaults.c.count).label('count')
