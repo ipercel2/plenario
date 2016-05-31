@@ -1,29 +1,27 @@
-from uuid import uuid4
-from datetime import datetime
-
-from sqlalchemy import Column, String, Boolean, Date, DateTime, \
-    Text, func, Table, select, Integer, create_engine
-from sqlalchemy import create_engine
-from sqlalchemy.dialects.postgresql import ARRAY
-from geoalchemy2 import Geometry
-from sqlalchemy.orm import scoped_session, sessionmaker, synonym
-from sqlalchemy.pool import QueuePool
-import sqlalchemy as sa
-from plenario.utils.helpers import get_size_in_degrees
-from flask_bcrypt import Bcrypt
 import json
-from hashlib import md5
-from operator import itemgetter
-
-from plenario.database import app_engine, session, Base
-from plenario.settings import DATABASE_CONN
-from plenario.utils.helpers import slugify
-
-from multiprocessing import Manager, Process
-from multiprocessing.util import register_after_fork
+import sqlalchemy as sa
 import threading
 
 from collections import namedtuple
+from datetime import datetime
+from hashlib import md5
+from operator import itemgetter
+from uuid import uuid4
+
+from flask_bcrypt import Bcrypt
+
+from plenario.database import session, Base
+from plenario.settings import DATABASE_CONN
+from plenario.utils.helpers import get_size_in_degrees, slugify
+
+from sqlalchemy import Column, String, Boolean, Date, DateTime,  Integer, Table, Text
+from sqlalchemy import create_engine, func, select
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.orm import scoped_session, sessionmaker, synonym
+from sqlalchemy.pool import QueuePool, SingletonThreadPool
+
+from geoalchemy2 import Geometry
+
 
 bcrypt = Bcrypt()
 
@@ -224,17 +222,19 @@ class MetaTable(Base):
         threads = []
         timeseries_dicts = []
 
-        engine = create_engine(DATABASE_CONN, poolclass=QueuePool, pool_size=0, max_overflow=0, pool_timeout=90)
-        scoped_sessionmaker = scoped_session(sessionmaker(bind=engine))
+        # set up engine for use with threading
+        psql_db = create_engine(DATABASE_CONN, pool_size=1000, echo_pool='debug')
+        scoped_sessionmaker = scoped_session(sessionmaker(bind=psql_db, autoflush=True, autocommit=True))
 
         def fetch_timeseries(t_name):
             _session = scoped_sessionmaker()
-            # extract information for specified table as a list of lists
+            # retrieve MetaTable object to call timeseries from
             table = MetaTable.get_by_dataset_name(t_name)
-            results = table.timeseries_one(agg_unit, start, end, geom)
+            # retrieve ResultProxy from executing timeseries selection
+            rp = _session.execute(table.timeseries(agg_unit, start, end, geom))
 
             # empty results will just have a header
-            if len(results) > 1:
+            if rp.rowcount > 0:
 
                 timeseries = {
                     'dataset_name': t_name,
@@ -242,15 +242,15 @@ class MetaTable(Base):
                     'count': 0
                 }
 
-                for i in xrange(1, len(results)):
-                    timeseries['items'].append({'count': results[i][0], 'datetime': results[i][1]})
-                    timeseries['count'] += results[i][0]
+                for row in rp.fetchall():
+                    timeseries['items'].append({'count': row.count, 'datetime': row.time_bucket.date()})
+                    timeseries['count'] += row.count
 
                 # load to outer storage
                 timeseries_dicts.append(timeseries)
 
             # clean up session
-            _session.close()
+            rp.close()
             scoped_sessionmaker.remove()
 
         # create a new thread for every table to query
@@ -267,7 +267,7 @@ class MetaTable(Base):
             thread.join()
 
         # release all connections associated with this engine
-        engine.dispose()
+        psql_db.dispose()
 
         return timeseries_dicts
 
