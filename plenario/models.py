@@ -637,3 +637,17 @@ class User(Base):
 
     def get_id(self):
         return self.id
+
+
+# =========
+# JobRecord
+# =========
+
+class JobRecord(Base):
+    """A record representing the status of an ongoing user submitted job."""
+
+    __tablename__ = 'job_record'
+    id     = Column(String(255), primary_key=True)
+    status = Column(String(255), nullable=False)
+    url    = Column(String(255), nullable=False)
+    result = Column(String)
