@@ -6,6 +6,7 @@ psycopg2
 geoalchemy2
 celery
 boto
+boto3
 shapely
 requests
 raven

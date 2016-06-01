@@ -1,5 +1,7 @@
 import json
+import logging
 import sqlalchemy
+import sys
 import threading
 
 from collections import namedtuple
@@ -226,31 +228,36 @@ class MetaTable(Base):
         scoped_sessionmaker = scoped_session(sessionmaker(bind=psql_db, autoflush=True, autocommit=True))
 
         def fetch_timeseries(t_name):
-            _session = scoped_sessionmaker()
-            # retrieve MetaTable object to call timeseries from
-            table = MetaTable.get_by_dataset_name(t_name)
-            # retrieve ResultProxy from executing timeseries selection
-            rp = _session.execute(table.timeseries(agg_unit, start, end, geom))
+            try:
+                _session = scoped_sessionmaker()
+                # retrieve MetaTable object to call timeseries from
+                table = MetaTable.get_by_dataset_name(t_name)
+                # retrieve ResultProxy from executing timeseries selection
+                rp = _session.execute(table.timeseries(agg_unit, start, end, geom))
 
-            # empty results will just have a header
-            if rp.rowcount > 0:
+                # empty results will just have a header
+                if rp.rowcount > 0:
 
-                timeseries = {
-                    'dataset_name': t_name,
-                    'items': [],
-                    'count': 0
-                }
+                    timeseries = {
+                        'dataset_name': t_name,
+                        'items': [],
+                        'count': 0
+                    }
 
-                for row in rp.fetchall():
-                    timeseries['items'].append({'count': row.count, 'datetime': row.time_bucket.date()})
-                    timeseries['count'] += row.count
+                    for row in rp.fetchall():
+                        timeseries['items'].append({'count': row.count, 'datetime': row.time_bucket.date()})
+                        timeseries['count'] += row.count
 
-                # load to outer storage
-                timeseries_dicts.append(timeseries)
+                    # load to outer storage
+                    timeseries_dicts.append(timeseries)
 
-            # clean up session
-            rp.close()
-            scoped_sessionmaker.remove()
+                # clean up session
+                rp.close()
+                scoped_sessionmaker.remove()
+            except Exception as ex:
+                logger = logging.getLogger(__name__)
+                logger.exception(ex)
+                sys.exit(42)
 
         # create a new thread for every table to query
         for name in table_names:

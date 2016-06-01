@@ -40,6 +40,8 @@ AWS_ACCESS_KEY = get('AWS_ACCESS_KEY', '')
 AWS_SECRET_KEY = get('AWS_SECRET_KEY', '')
 S3_BUCKET = get('S3_BUCKET', '')
 
+SQS_NAME = 'FAKEOFFICIAL'
+
 # Email address for notifying site administrators
 # Expect comma-delimited list of emails.
 email_list = get('ADMIN_EMAILS')

@@ -1,26 +1,25 @@
 """jobs: api endpoint for submitting, monitoring, and deleting jobs"""
 
-# api => flask blueprint instance
-# prefix => namespacing string '/v1/api'
-from . import api, prefix
+import boto3
 
-# HTTP      URI         ACTION
-# ============================
-# GET       /jobs/:id   retrieve job status
-# POST      /jobs       submit new job
-# DELETE    /jobs/:id   cancel ongoing job
+from plenario.api import api, prefix
+from tests.jobs import RANDOM_QUEUE_NAME
+
+# ========================================= #
+# HTTP      URI         ACTION              #
+# ========================================= #
+# GET       /jobs/:id   retrieve job status #
+# POST      /jobs       submit new job      #
+# DELETE    /jobs/:id   cancel ongoing job  #
+# ========================================= #
 
 
-@api.route(prefix + '/jobs/<int:job_id>', methods=['GET'])
+@api.route(prefix + '/jobs/<job_id>', methods=['GET'])
 def get_job(job_id):
-    # TODO: check job queue for job_id
-    # status = SQS.check(job_id)
-    if 'status' == 'completed':
-        return '200 OK: Job Results for:', job_id
-    elif 'status' == 'in_progress':
-        # TODO: Status template?
-        return '200 Ok: job status for:', job_id
-    else:
+    try:
+        message = fetch_message_from_queue(RANDOM_QUEUE_NAME, job_id)
+        return '200 OK: Job Results for:' + job_id + "::" + message['MessageBody']
+    except LookupError as err:
         return '404 Not found: bad request for:', job_id
 
 
@@ -61,3 +60,44 @@ def jobable(func, is_job=False):
             pass
 
     return decorated
+
+
+# ===========
+# SQS Methods
+# ===========
+
+def fetch_message_from_queue(QueueName, MessageId):
+    """
+    Find and return the message stored in Amazon SQS for this job ID.
+
+    :param QueueName: name of queue in SQS
+    :param MessageId: index of the queue to check
+
+    :returns: message
+    """
+
+    # fetch existing queue
+    client = boto3.client('sqs')
+    queue = client.create_queue(QueueName=QueueName)
+
+    # if queue does not exist, be loud
+    if queue is None:
+        raise LookupError('fetch_message_from_queue() Queue: ' + QueueName + 'not found!')
+
+    # retrieve messages from queue as a ResultSet
+    # TODO: this is consuming the messages
+    result = client.receive_message(
+        QueueUrl=queue['QueueUrl'],
+        AttributeNames=['All'],
+        MessageAttributeNames=['job_status'],
+        MaxNumberOfMessages=10,
+        VisibilityTimeout=0
+    )
+
+    # look for message
+    for message in result['Messages']:
+        if message['MessageId'] == MessageId:
+            return message
+
+    # if message not found, be loud
+    raise LookupError('fetch_message_from_queue() ID: ' + MessageId + ' not found in the queue!')
