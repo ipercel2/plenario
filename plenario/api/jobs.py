@@ -85,7 +85,7 @@ def submit_job_record(base_url, job_id):
 
     session = Session()
     try:
-        job_rec = JobRecord(id=job_id, status='ongoing', url=base_url + job_id)
+        job_rec = JobRecord(id=job_id, status='queued', url=base_url + job_id)
         session.add(job_rec)
         session.commit()
         return job_rec

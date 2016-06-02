@@ -1,7 +1,13 @@
-from flask import Flask, abort
+import json
 import plenario.tasks as tasks
-from plenario.tasks import celery_app
+
+from flask import Flask, abort, request
 from multiprocessing import Process
+
+from plenario.api import detail_aggregate
+from plenario.database import session as Session
+from plenario.models import JobRecord
+from plenario.tasks import celery_app
 
 
 """
@@ -37,7 +43,38 @@ def create_worker():
         else:
             abort(503)
 
+    @app.route('/job', methods=['POST'])
+    def execute_job():
+        job_id = request.form['title']
+        job_details = request.form['text']
+        # get corresponding job
+        job = Session.query(JobRecord).filter(JobRecord.id == job_id).first()
+        # update status for the user
+        job.status = 'ongoing'
+        # json result of running specified query
+        result = execute(request.form)
+        # final update on the job record and store results
+        job.status = 'completed'
+        job.result = result
+        Session.commit()
+
+        return "Job ID: " + job.id + " completed."
+
     return app
+
+
+# TODO: Find somewhere else to put this.
+def execute(job_details):
+    """
+    Parse string and decide what methods need to be executed on the backend.
+
+    :param job_details: string containing job query specifics
+
+     :returns: query result in json format
+     """
+
+    print(job_details)
+    return json.dumps(job_details)
 
 
 def often_update():

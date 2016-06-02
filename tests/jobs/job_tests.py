@@ -4,6 +4,7 @@ import unittest
 from plenario import create_app
 from plenario.api import prefix
 from plenario.api.jobs import *
+from plenario.update import create_worker
 from tests.jobs import RANDOM_NAME
 
 
@@ -14,6 +15,8 @@ class TestJobs(unittest.TestCase):
 
         # setup flask app instance
         cls.app = create_app().test_client()
+        # setup flask app instance for worker
+        cls.worker = create_worker().test_client()
 
         # setup up sqs queue with a random name (to avoid 60 second deletion cooldown)
         cls.client = boto3.client('sqs')
@@ -21,20 +24,6 @@ class TestJobs(unittest.TestCase):
         cls.queue = cls.client.create_queue(
             QueueName=cls.queue_name,
             Attributes={'VisibilityTimeout': '0'}
-        )
-
-        mock_messages = [
-            {'Id': '1', 'MessageBody': 'TestMessage!'},
-            {'Id': '2', 'MessageBody': 'Space Dandy!'},
-            {'Id': '3', 'MessageBody': 'Yeah baby!'},
-            {'Id': '4', 'MessageBody': 'You can do it!'},
-            {'Id': '5', 'MessageBody': 'Why!'}
-        ]
-
-        # seed queue with mock data
-        cls.response = cls.client.send_message_batch(
-            QueueUrl=cls.queue['QueueUrl'],
-            Entries=mock_messages
         )
 
     # =============
@@ -81,6 +70,37 @@ class TestJobs(unittest.TestCase):
 
         msg_id = enqueue_message(RANDOM_NAME, 'Hello!')
         self.assertIsNotNone(msg_id)
+
+    # =====================
+    # TEST: Worker Endpoint
+    # =====================
+
+    def test_worker_endpoint_execute_job(self):
+        """Establish that the worker has successfuly recieved the job, executed it,
+        and updated the appropriate record. Do this with a dummy job that wasn't fetched
+        from the queue."""
+
+        job_id = RANDOM_NAME + '-worker_test_1'
+
+        submit_job_record('/test_url/', job_id)
+        self.worker.post('/job', data={'title': job_id, 'text': 'do_this_for_me'})
+
+        job = Session.query(JobRecord).filter(JobRecord.id == job_id).first()
+
+        self.assertIsNotNone(job.result)
+
+    def test_worker_endpoint_execute_with_job_from_queue(self):
+        """Establish that worker has done everything stated in the previous method,
+        but this time with a message that's made it through the queue."""
+
+        job_id = enqueue_message(RANDOM_NAME, 'timeseries?obs_date__ge=2016-1-1')
+        submit_job_record('/jobs/', job_id)
+        message = self.client.receive_message(QueueUrl=self.queue['QueueUrl'])['Messages'][0]
+        self.worker.post('/job', data=dict(title=message['MessageId'], text=message['Body']))
+
+        job = Session.query(JobRecord).filter(JobRecord.id == job_id).first()
+
+        self.assertIsNotNone(job.result)
 
     @classmethod
     def tearDownClass(cls):
