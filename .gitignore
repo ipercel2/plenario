@@ -15,7 +15,6 @@ notebooks/
 .elasticbeanstalk/*
 !.elasticbeanstalk/*.cfg.yml
 !.elasticbeanstalk/*.global.yml
-plenario-venv/
 .idea/
 .ipynb_checkpoints/
 .ropeproject/

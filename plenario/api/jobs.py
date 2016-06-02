@@ -6,7 +6,12 @@ from plenario.database import session as Session
 from plenario.models import JobRecord
 from flask import request
 from functools32 import wraps
-from tests.jobs import RANDOM_QUEUE_NAME
+from tests.jobs import RANDOM_NAME
+
+# for testing only, difficult to see if working unless
+# hooked up to a real queue. So I have it pointing
+# to the temporary queue made by the test suite
+MOCK_QUEUE = RANDOM_NAME
 
 
 # ========================================= #
@@ -19,19 +24,17 @@ from tests.jobs import RANDOM_QUEUE_NAME
 
 def get_job(job_id):
 
-    try:
-        rp = Session.query(JobRecord).filter(JobRecord.id == job_id)
-        job_status = rp.first()
-        return '200 OK: Job Results for:' + job_id + ':' + job_status
-    except LookupError:
-        return '404 Not found: bad request for:', job_id
+    rp = Session.query(JobRecord).filter(JobRecord.id == job_id)
+    job = rp.first()
+    return '200 OK: Job Results for:' + job.id + ':' + job.status
 
 
 def post_job():
 
+    # TODO: Establish a friendly form!
     query = request.full_path.split('?')[1]
-    job_id = enqueue_message(RANDOM_QUEUE_NAME, query)
-    job_rec = submit_job_record('/v1/api/' + '/jobs/' + job_id, job_id)
+    job_id = enqueue_message(MOCK_QUEUE, query)
+    job_rec = submit_job_record('/v1/api/' + '/jobs/', job_id)
     return "Find your job at: " + job_rec.url
 
 
@@ -61,7 +64,7 @@ def jobable(fn):
         is_job = request.args.get('job')
         query = request.full_path.split('?')[1]
         if is_job:
-            job_id = enqueue_message(RANDOM_QUEUE_NAME, query)
+            job_id = enqueue_message(MOCK_QUEUE, query)
             job_rec = submit_job_record('/v1/api/jobs/', job_id)
             # TODO: Replace with a template.
             return "Find your job at: " + job_rec.url
