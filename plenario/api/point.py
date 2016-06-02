@@ -17,6 +17,7 @@ from sqlalchemy.types import NullType
 from collections import OrderedDict
 
 from plenario.models import ShapeMetadata
+from plenario.api.jobs import jobable
 
 import sys
 
@@ -591,6 +592,7 @@ def timeseries():
         sys.exit(42)
 
 
+@jobable
 @cache.cached(timeout=CACHE_TIMEOUT, key_prefix=make_cache_key)
 @crossdomain(origin="*")
 def detail_aggregate():

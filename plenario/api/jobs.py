@@ -3,9 +3,12 @@
 import boto3
 
 from plenario.api import api, prefix
-from plenario.database import session
+from plenario.database import session as Session
 from plenario.models import JobRecord
+from flask import Request
+from functools32 import wraps
 from tests.jobs import RANDOM_QUEUE_NAME
+
 
 # ========================================= #
 # HTTP      URI         ACTION              #
@@ -15,24 +18,24 @@ from tests.jobs import RANDOM_QUEUE_NAME
 # DELETE    /jobs/:id   cancel ongoing job  #
 # ========================================= #
 
-
 @api.route(prefix + '/jobs/<job_id>', methods=['GET'])
 def get_job(job_id):
 
-    _session = session()
-
     try:
-        rp = _session.query(JobRecord).filter(JobRecord.id == job_id)
+        rp = Session.query(JobRecord).filter(JobRecord.id == job_id)
         job_status = rp.first()
-
-        return '200 OK: Job Results for:' + job_id +
-    except LookupError as err:
+        return '200 OK: Job Results for:' + job_id + ':' + job_status
+    except LookupError:
         return '404 Not found: bad request for:', job_id
 
 
 @api.route(prefix + '/jobs', methods=['POST'])
 def post_job():
-    return '202 Accepted: here is your job location'
+
+    query = Request.full_path.split('?')[1]
+    job_id = enqueue_message(RANDOM_QUEUE_NAME, query)
+    job_rec = submit_job_record('/v1/api/' + '/jobs/' + job_id, job_id)
+    return "Find your job at: " + job_rec.url
 
 
 @api.route(prefix + '/jobs/<int:job_id>', methods=['DELETE'])
@@ -43,66 +46,56 @@ def delete_job(job_id):
 # ===========
 # Job Methods
 # ===========
+# jobable: decorator which is responsible for providing the option to submit jobs
+# submit_job_record: creates a record to keep track of a job's status and result
+# enqueue_message: creates a job message and adds it to a queue for the worker
 
-def jobable(func):
+def jobable(fn):
     """
     Decorating for existing route functions. Allows user to specify if they
     would like to add their query to the job queue and recieve a ticket.
 
-    :param func: api endpoint
+    :param fn: flask route function
 
     :returns: decorated endpoint
     """
 
-    def decorated(is_job=False, *args, **kwargs):
-
+    @wraps
+    def wrapper(*args, **kwargs):
+        is_job = Request.args.get('job')
+        query = Request.full_path.split('?')[1]
         if is_job:
-
-            # TODO: What's message going to be? How do we get it? How does the worker interpret it?
-            job_id = enqueue_message(RANDOM_QUEUE_NAME, message)
-            base_url = prefix + '/jobs/' + job_id
-
-            _session = session()
-
-            # commit the job record, be loud if anything goes wrong
-            try:
-                job_rec = submit_job_record(base_url, job_id, _session)
-                _session.commit()
-            except:
-                _session.rollback()
-                raise Exception('(jobable) session failed to commit job record')
-            finally:
-                _session.close()
-
-            # TODO: replace with something nicer please
+            job_id = enqueue_message(RANDOM_QUEUE_NAME, query)
+            job_rec = submit_job_record('/v1/api/' + '/jobs/' + job_id, job_id)
+            # TODO: Replace with a template.
             return "Find your job at: " + job_rec.url
-
         else:
-            return func(args)
+            return fn(*args, **kwargs)
+    return wrapper
 
-    return decorated
 
-
-def submit_job_record(base_url, job_id, session):
+def submit_job_record(base_url, job_id):
     """
     Create a job record in the database that keeps track of a job's status.
 
     :param base_url: the whole url EXCEPT the job_id
     :param job_id: the message id returned from when job was enqueued
-    :param session: a dependancy, to keep the function independant of the
-                    context it's run inn
 
     :return: a copy of the record object
     """
 
-    job_rec = JobRecord(id=job_id, status='ongoing', url=base_url + job_id)
-    session.add(job_rec)
-    return job_rec
+    session = Session()
+    try:
+        job_rec = JobRecord(id=job_id, status='ongoing', url=base_url + job_id)
+        session.add(job_rec)
+        session.commit()
+        return job_rec
+    except:
+        session.rollback()
+        raise Exception('submit_job_record :: could not create job record for ' + job_id)
+    finally:
+        session.close()
 
-
-# ===========
-# SQS Methods
-# ===========
 
 def enqueue_message(queue_name, message):
     """
@@ -120,4 +113,3 @@ def enqueue_message(queue_name, message):
         MessageBody=message,
         DelaySeconds=0,
     )['MessageId']
-

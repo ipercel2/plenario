@@ -19,7 +19,8 @@ class TestJobs(unittest.TestCase):
         cls.queue_name = RANDOM_QUEUE_NAME
         cls.queue = cls.client.create_queue(
             QueueName=cls.queue_name,
-            Attributes={'VisibilityTimeout': '0'})
+            Attributes={'VisibilityTimeout': '0'}
+        )
 
         mock_messages = [
             {'Id': '1', 'MessageBody': 'TestMessage!'},
@@ -35,6 +36,19 @@ class TestJobs(unittest.TestCase):
             Entries=mock_messages
         )
 
+    # ==============
+    # TEST: post_job
+    # ==============
+
+    def test_post_job_good_params(self):
+
+        response = cls.app.post(
+            prefix + '/jobs',
+            data={'obs_date__ge': '2016-1-1'}
+        )
+
+        print response
+
     # =====================
     # TEST: enqueue_message
     # =====================
@@ -43,7 +57,6 @@ class TestJobs(unittest.TestCase):
 
         msg_id = enqueue_message(RANDOM_QUEUE_NAME, 'Hello!')
         self.assertIsNotNone(msg_id)
-
 
     @classmethod
     def tearDownClass(cls):
