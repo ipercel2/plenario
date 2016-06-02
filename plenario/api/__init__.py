@@ -6,6 +6,7 @@ from shape import get_all_shape_datasets,\
                     export_shape, aggregate_point_data
 from time import sleep
 from sensor import weather_stations, weather
+from jobs import get_job, post_job, delete_job
 
 API_VERSION = '/v1'
 
@@ -25,6 +26,10 @@ api.add_url_rule(prefix + '/weather-stations/', 'weather_stations', weather_stat
 api.add_url_rule(prefix + '/shapes/', 'shape_index', get_all_shape_datasets)
 api.add_url_rule(prefix + '/shapes/<dataset_name>', 'shape_export', export_shape)
 api.add_url_rule(prefix + '/shapes/<polygon_dataset_name>/<point_dataset_name>', 'aggregate', aggregate_point_data)
+
+api.add_url_rule(prefix + '/jobs/', view_func=post_job, methods=['POST'])
+api.add_url_rule(prefix + '/jobs/<job_id>', view_func=get_job, methods=['GET'])
+api.add_url_rule(prefix + '/jobs/<job_id>', view_func=delete_job, methods=['DELETE'])
 
 
 @api.route(prefix + '/flush-cache')

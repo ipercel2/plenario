@@ -2,10 +2,9 @@
 
 import boto3
 
-from plenario.api import api, prefix
 from plenario.database import session as Session
 from plenario.models import JobRecord
-from flask import Request
+from flask import request
 from functools32 import wraps
 from tests.jobs import RANDOM_QUEUE_NAME
 
@@ -18,7 +17,6 @@ from tests.jobs import RANDOM_QUEUE_NAME
 # DELETE    /jobs/:id   cancel ongoing job  #
 # ========================================= #
 
-@api.route(prefix + '/jobs/<job_id>', methods=['GET'])
 def get_job(job_id):
 
     try:
@@ -29,16 +27,14 @@ def get_job(job_id):
         return '404 Not found: bad request for:', job_id
 
 
-@api.route(prefix + '/jobs', methods=['POST'])
 def post_job():
 
-    query = Request.full_path.split('?')[1]
+    query = request.full_path.split('?')[1]
     job_id = enqueue_message(RANDOM_QUEUE_NAME, query)
     job_rec = submit_job_record('/v1/api/' + '/jobs/' + job_id, job_id)
     return "Find your job at: " + job_rec.url
 
 
-@api.route(prefix + '/jobs/<int:job_id>', methods=['DELETE'])
 def delete_job(job_id):
     return '200 Ok: job', job_id, 'removed'
 
@@ -62,11 +58,11 @@ def jobable(fn):
 
     @wraps
     def wrapper(*args, **kwargs):
-        is_job = Request.args.get('job')
-        query = Request.full_path.split('?')[1]
+        is_job = request.args.get('job')
+        query = request.full_path.split('?')[1]
         if is_job:
             job_id = enqueue_message(RANDOM_QUEUE_NAME, query)
-            job_rec = submit_job_record('/v1/api/' + '/jobs/' + job_id, job_id)
+            job_rec = submit_job_record('/v1/api/jobs/', job_id)
             # TODO: Replace with a template.
             return "Find your job at: " + job_rec.url
         else:
@@ -90,9 +86,9 @@ def submit_job_record(base_url, job_id):
         session.add(job_rec)
         session.commit()
         return job_rec
-    except:
+    except Exception as ex:
         session.rollback()
-        raise Exception('submit_job_record :: could not create job record for ' + job_id)
+        raise Exception(' submit_job_record :: could not create job record for ' + job_id + '\n\n' + str(ex))
     finally:
         session.close()
 

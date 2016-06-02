@@ -38,7 +38,8 @@ def init_master_meta_user():
 def init_meta():
     non_meta_tables = [table for table in Base.metadata.sorted_tables
                        if table.name not in
-                       {'meta_master', 'meta_shape', 'plenario_user'}]
+                       {'meta_master', 'meta_shape', 'plenario_user', 'job_record'}]
+    # clear out tables not in the good list
     for t in non_meta_tables:
         Base.metadata.remove(t)
     Base.metadata.create_all(bind=app_engine)

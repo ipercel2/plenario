@@ -2,6 +2,7 @@ import boto3
 import unittest
 
 from plenario import create_app
+from plenario.api import prefix
 from plenario.api.jobs import *
 from tests.jobs import RANDOM_QUEUE_NAME
 
@@ -36,15 +37,22 @@ class TestJobs(unittest.TestCase):
             Entries=mock_messages
         )
 
+    # =======================
+    # TEST: submit_job_record
+    # =======================
+
+    def test_submit_job_record_good_params(self):
+        result = submit_job_record('/test/', '12345678')
+        self.assertIsNotNone(request)
+
     # ==============
     # TEST: post_job
     # ==============
 
     def test_post_job_good_params(self):
 
-        response = cls.app.post(
-            prefix + '/jobs',
-            data={'obs_date__ge': '2016-1-1'}
+        response = self.app.post(
+            prefix + '/jobs?obs_date__ge=2016-1-1',
         )
 
         print response

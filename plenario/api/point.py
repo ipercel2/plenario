@@ -17,9 +17,7 @@ from sqlalchemy.types import NullType
 from collections import OrderedDict
 
 from plenario.models import ShapeMetadata
-from plenario.api.jobs import jobable
 
-import sys
 
 class ParamValidator(object):
 
@@ -90,7 +88,7 @@ class ParamValidator(object):
                 elif err:
                     # Valid field was specified, but operator was malformed
                     return err
-                # else k wasn't an attempt at setting a condition
+                    # else k wasn't an attempt at setting a condition
 
             # This param is neither present in the optional params
             # nor does it specify a field in this dataset.
@@ -128,9 +126,9 @@ class ParamValidator(object):
     }
 
     def _check_shape_condition(self, field):
-        #returns false if the shape column is 
-        return self.vals.get('shape') is not None\
-         and '{}.{}'.format(self.vals['shape'], field) in self.cols
+        #returns false if the shape column is
+        return self.vals.get('shape') is not None \
+               and '{}.{}'.format(self.vals['shape'], field) in self.cols
 
     def _make_condition(self, k, v):
         # Generally, we expect the form k = [field]__[op]
@@ -143,7 +141,7 @@ class ParamValidator(object):
             # Rather than return an error here,
             # we'll return None to indicate that this field wasn't present
             # and let the calling function send a warning to the client.
-            
+
             return None, None
 
         col = self.dataset.columns.get(field)
@@ -160,7 +158,7 @@ class ParamValidator(object):
             valid_op_codes = self.field_ops.keys() + ['in']
             if op_code not in valid_op_codes:
                 error_msg = "Invalid dataset field operator:" \
-                                " {} called in {}={}".format(op_code, k, v)
+                            " {} called in {}={}".format(op_code, k, v)
                 return None, error_msg
             else:
                 cond = self._make_condition_with_operator(col, op_code, v)
@@ -191,7 +189,7 @@ class ParamValidator(object):
 '''
 
 def setup_detail_validator(dataset_name, params):
-    
+
     try:
         if 'shape' in params:
             shape = params['shape']
@@ -201,17 +199,17 @@ def setup_detail_validator(dataset_name, params):
     except NoSuchTableError:
         return bad_request("Cannot find dataset named {}".format(dataset_name))
 
-    validator\
+    validator \
         .set_optional('obs_date__ge',
                       date_validator,
-                      datetime.now() - timedelta(days=90))\
-        .set_optional('obs_date__le', date_validator, datetime.now())\
-        .set_optional('location_geom__within', geom_validator, None)\
-        .set_optional('offset', int_validator, 0)\
+                      datetime.now() - timedelta(days=90)) \
+        .set_optional('obs_date__le', date_validator, datetime.now()) \
+        .set_optional('location_geom__within', geom_validator, None) \
+        .set_optional('offset', int_validator, 0) \
         .set_optional('data_type',
                       make_format_validator(['json', 'csv', 'geojson']),
-                      'json')\
-        .set_optional('date__time_of_day_ge', time_of_day_validator, 0)\
+                      'json') \
+        .set_optional('date__time_of_day_ge', time_of_day_validator, 0) \
         .set_optional('date__time_of_day_le', time_of_day_validator, 23)
 
     '''create another validator to check if shape dataset is in meta_shape, then return
@@ -225,8 +223,8 @@ def agg_validator(agg_str):
     if agg_str in VALID_AGG:
         return agg_str, None
     else:
-        error_msg = '{} is not a valid unit of aggregation. Plenario accepts {}'\
-                    .format(agg_str, ','.join(VALID_AGG))
+        error_msg = '{} is not a valid unit of aggregation. Plenario accepts {}' \
+            .format(agg_str, ','.join(VALID_AGG))
         return None, error_msg
 
 
@@ -258,8 +256,8 @@ def make_format_validator(valid_formats):
         if format_str in valid_formats:
             return format_str, None
         else:
-            error_msg = '{} is not a valid output format. Plenario accepts {}'\
-                        .format(format_str, ','.join(valid_formats))
+            error_msg = '{} is not a valid output format. Plenario accepts {}' \
+                .format(format_str, ','.join(valid_formats))
             return error_msg, None
 
     return format_validator
@@ -494,8 +492,8 @@ def form_detail_sql_query(validator, aggregate_points=False):
     #if the query specified a shape dataset, add a join to the sql query with that dataset
     shape_table = validator.vals.get('shape')
     if shape_table != None:
-        shape_columns = ['{}.{} as {}'.format(shape_table.name, col.name, col.name) for col in shape_table.c]   
-        if aggregate_points: 
+        shape_columns = ['{}.{} as {}'.format(shape_table.name, col.name, col.name) for col in shape_table.c]
+        if aggregate_points:
             q = q.from_self(shape_table).filter(dset.c.geom.ST_Intersects(shape_table.c.geom)).group_by(shape_table)
         else:
             q = q.join(shape_table, dset.c.geom.ST_Within(shape_table.c.geom))
@@ -507,92 +505,83 @@ def form_detail_sql_query(validator, aggregate_points=False):
 @cache.cached(timeout=CACHE_TIMEOUT, key_prefix=make_cache_key)
 @crossdomain(origin="*")
 def timeseries():
+    validator = ParamValidator() \
+        .set_optional('agg', agg_validator, 'week') \
+        .set_optional('data_type', make_format_validator(['json', 'csv']), 'json') \
+        .set_optional('dataset_name__in', list_of_datasets_validator, MetaTable.index) \
+        .set_optional('obs_date__ge', date_validator, datetime.now() - timedelta(days=90)) \
+        .set_optional('obs_date__le', date_validator, datetime.now()) \
+        .set_optional('location_geom__within', geom_validator, None) \
+        .set_optional('buffer', int_validator, 100)
+
+    err = validator.validate(request.args)
+    if err:
+        return bad_request(err)
+
+    geom = validator.get_geom()
+    table_names = validator.vals['dataset_name__in']
+    start_date = validator.vals['obs_date__ge']
+    end_date = validator.vals['obs_date__le']
+    agg = validator.vals['agg']
+
+    # Only examine tables that have a chance of containing records within the date and space boundaries.
+    try:
+        table_names = MetaTable.narrow_candidates(table_names, start_date, end_date, geom)
+    except Exception as e:
+        msg = 'Failed to gather candidate tables.'
+        return internal_error(msg, e)
 
     try:
-        validator = ParamValidator()\
-            .set_optional('agg', agg_validator, 'week')\
-            .set_optional('data_type', make_format_validator(['json', 'csv']), 'json')\
-            .set_optional('dataset_name__in', list_of_datasets_validator, MetaTable.index)\
-            .set_optional('obs_date__ge', date_validator, datetime.now() - timedelta(days=90))\
-            .set_optional('obs_date__le', date_validator, datetime.now())\
-            .set_optional('location_geom__within', geom_validator, None)\
-            .set_optional('buffer', int_validator, 100)
+        panel = MetaTable.timeseries_all(table_names=table_names,
+                                         agg_unit=agg,
+                                         start=start_date,
+                                         end=end_date,
+                                         geom=geom)
+    except Exception as e:
+        msg = 'Failed to construct timeseries.'
+        return internal_error(msg, e)
 
-        err = validator.validate(request.args)
-        if err:
-            return bad_request(err)
+    panel = MetaTable.attach_metadata(panel)
+    resp = json_response_base(validator, panel)
 
-        geom = validator.get_geom()
-        table_names = validator.vals['dataset_name__in']
-        start_date = validator.vals['obs_date__ge']
-        end_date = validator.vals['obs_date__le']
-        agg = validator.vals['agg']
+    datatype = validator.vals['data_type']
+    if datatype == 'json':
+        resp = make_response(json.dumps(resp, default=dthandler), 200)
+        resp.headers['Content-Type'] = 'application/json'
+    elif datatype == 'csv':
 
-        # Only examine tables that have a chance of containing records within the date and space boundaries.
-        try:
-            table_names = MetaTable.narrow_candidates(table_names, start_date, end_date, geom)
-        except Exception as e:
-            msg = 'Failed to gather candidate tables.'
-            return internal_error(msg, e)
+        # response format
+        # temporal_group,dataset_name_1,dataset_name_2
+        # 2014-02-24 00:00:00,235,653
+        # 2014-03-03 00:00:00,156,624
 
-        try:
-            panel = MetaTable.timeseries_all(table_names=table_names,
-                                             agg_unit=agg,
-                                             start=start_date,
-                                             end=end_date,
-                                             geom=geom)
-        except Exception as e:
-            msg = 'Failed to construct timeseries.'
-            return internal_error(msg, e)
+        fields = ['temporal_group']
+        for o in resp['objects']:
+            fields.append(o['dataset_name'])
 
-        panel = MetaTable.attach_metadata(panel)
-        resp = json_response_base(validator, panel)
+        csv_resp = []
+        i = 0
+        for k,g in groupby(resp['objects'], key=itemgetter('dataset_name')):
+            l_g = list(g)[0]
 
-        datatype = validator.vals['data_type']
-        if datatype == 'json':
-            resp = make_response(json.dumps(resp, default=dthandler), 200)
-            resp.headers['Content-Type'] = 'application/json'
-        elif datatype == 'csv':
+            j = 0
+            for row in l_g['items']:
+                # first iteration, populate the first column with temporal_groups
+                if i == 0:
+                    csv_resp.append([row['datetime']])
+                csv_resp[j].append(row['count'])
+                j += 1
+            i += 1
 
-            # response format
-            # temporal_group,dataset_name_1,dataset_name_2
-            # 2014-02-24 00:00:00,235,653
-            # 2014-03-03 00:00:00,156,624
-
-            fields = ['temporal_group']
-            for o in resp['objects']:
-                fields.append(o['dataset_name'])
-
-            csv_resp = []
-            i = 0
-            for k,g in groupby(resp['objects'], key=itemgetter('dataset_name')):
-                l_g = list(g)[0]
-
-                j = 0
-                for row in l_g['items']:
-                    # first iteration, populate the first column with temporal_groups
-                    if i == 0:
-                        csv_resp.append([row['datetime']])
-                    csv_resp[j].append(row['count'])
-                    j += 1
-                i += 1
-
-            csv_resp.insert(0, fields)
-            csv_resp = make_csv(csv_resp)
-            resp = make_response(csv_resp, 200)
-            resp.headers['Content-Type'] = 'text/csv'
-            filedate = datetime.now().strftime('%Y-%m-%d')
-            resp.headers['Content-Disposition'] = 'attachment; filename=%s.csv' % filedate
-        return resp
-
-    except Exception as ex:
-        print ex.args
-        print ex.message
-        print ex
-        sys.exit(42)
+        csv_resp.insert(0, fields)
+        csv_resp = make_csv(csv_resp)
+        resp = make_response(csv_resp, 200)
+        resp.headers['Content-Type'] = 'text/csv'
+        filedate = datetime.now().strftime('%Y-%m-%d')
+        resp.headers['Content-Disposition'] = 'attachment; filename=%s.csv' % filedate
+    return resp
 
 
-@jobable
 @cache.cached(timeout=CACHE_TIMEOUT, key_prefix=make_cache_key)
 @crossdomain(origin="*")
 def detail_aggregate():
@@ -609,11 +598,11 @@ def detail_aggregate():
     except NoSuchTableError:
         return bad_request("Cannot find dataset named {}".format(dataset_name))
 
-    validator\
-        .set_optional('obs_date__ge', date_validator, datetime.now() - timedelta(days=90))\
-        .set_optional('obs_date__le', date_validator, datetime.now())\
-        .set_optional('location_geom__within', geom_validator, None)\
-        .set_optional('data_type', make_format_validator(['json', 'csv']), 'json')\
+    validator \
+        .set_optional('obs_date__ge', date_validator, datetime.now() - timedelta(days=90)) \
+        .set_optional('obs_date__le', date_validator, datetime.now()) \
+        .set_optional('location_geom__within', geom_validator, None) \
+        .set_optional('data_type', make_format_validator(['json', 'csv']), 'json') \
         .set_optional('agg', agg_validator, 'week')
 
     # If any optional parameters are malformed, we're better off bailing and telling the user
@@ -673,7 +662,7 @@ def detail():
 
     #Part 2: Form SQL query from parameters stored in 'validator' object
     q = form_detail_sql_query(validator)
-    
+
     # Page in RESPONSE_LIMIT chunks
     offset = validator.vals['offset']
     q = q.limit(RESPONSE_LIMIT)
@@ -703,7 +692,7 @@ def detail():
 
     elif datatype == 'geojson':
         resp = form_geojson_detail_response(to_remove, validator, rows)
-    
+
     return resp
 
 
@@ -723,11 +712,11 @@ def grid():
     except NoSuchTableError:
         return bad_request("Could not find dataset named {}.".format(dataset_name))
 
-    validator.set_optional('buffer', int_validator, 100)\
-             .set_optional('resolution', int_validator, 500)\
-             .set_optional('location_geom__within', geom_validator, None)\
-             .set_optional('obs_date__ge', date_validator, datetime.now() - timedelta(days=90))\
-             .set_optional('obs_date__le', date_validator, datetime.now())\
+    validator.set_optional('buffer', int_validator, 100) \
+        .set_optional('resolution', int_validator, 500) \
+        .set_optional('location_geom__within', geom_validator, None) \
+        .set_optional('obs_date__ge', date_validator, datetime.now() - timedelta(days=90)) \
+        .set_optional('obs_date__le', date_validator, datetime.now()) \
 
     err = validator.validate(raw_query_params)
     if err:
@@ -779,12 +768,12 @@ def meta():
     validator = ParamValidator()
     validator.set_optional('dataset_name',
                            no_op_validator,
-                           None)\
-             .set_optional('location_geom__within',
-                           geom_validator,
-                           None)\
-             .set_optional('obs_date__ge', date_validator, None)\
-             .set_optional('obs_date__le', date_validator, None)
+                           None) \
+        .set_optional('location_geom__within',
+                      geom_validator,
+                      None) \
+        .set_optional('obs_date__ge', date_validator, None) \
+        .set_optional('obs_date__le', date_validator, None)
 
     err = validator.validate(request.args)
     if err:
@@ -877,8 +866,8 @@ def dataset_fields(dataset_name):
 
 def make_field_query(dataset_name):
     table = Table(dataset_name, Base.metadata,
-                      autoload=True, autoload_with=engine,
-                      extend_existing=True)
+                  autoload=True, autoload_with=engine,
+                  extend_existing=True)
 
     cols = []
     for col in table.columns:
