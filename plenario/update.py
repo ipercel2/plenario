@@ -43,19 +43,17 @@ def create_worker():
         else:
             abort(503)
 
-    @app.route('/job', methods=['POST'])
-    def execute_job():
-        job_id = request.form['title']
-        job_details = request.form['text']
+    @app.route('/jobs/<job_id>/<job_method>', methods=['GET'])
+    def execute_job(job_id, job_method):
         # get corresponding job
         job = Session.query(JobRecord).filter(JobRecord.id == job_id).first()
         # update status for the user
         job.status = 'ongoing'
         # json result of running specified query
-        result = execute(request.form)
+        result = execute(job_method, request.args)
         # final update on the job record and store results
         job.status = 'completed'
-        job.result = result
+        job.result = json.dumps(result.data)
         Session.commit()
 
         return "Job ID: " + job.id + " completed."
@@ -64,17 +62,20 @@ def create_worker():
 
 
 # TODO: Find somewhere else to put this.
-def execute(job_details):
+def execute(job_method, job_args):
     """
     Parse string and decide what methods need to be executed on the backend.
 
-    :param job_details: string containing job query specifics
+    :param : string containing job query specifics
 
-     :returns: query result in json format
-     """
+    :returns: query result in json format
+    """
 
-    print(job_details)
-    return json.dumps(job_details)
+    methods = {
+        'detail_aggregate': detail_aggregate
+    }
+
+    return methods[job_method](job_args)
 
 
 def often_update():

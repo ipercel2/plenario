@@ -640,6 +640,64 @@ def detail_aggregate():
 
     return resp
 
+
+def detail_aggregate(args):
+    raw_query_params = args.copy()
+    # First, make sure name of dataset was provided...
+    try:
+        dataset_name = raw_query_params.pop('dataset_name')
+    except KeyError:
+        return bad_request("'dataset_name' is required")
+
+    # and that we have that dataset.
+    try:
+        validator = ParamValidator(dataset_name)
+    except NoSuchTableError:
+        return bad_request("Cannot find dataset named {}".format(dataset_name))
+
+    validator \
+        .set_optional('obs_date__ge', date_validator, datetime.now() - timedelta(days=90)) \
+        .set_optional('obs_date__le', date_validator, datetime.now()) \
+        .set_optional('location_geom__within', geom_validator, None) \
+        .set_optional('data_type', make_format_validator(['json', 'csv']), 'json') \
+        .set_optional('agg', agg_validator, 'week')
+
+    # If any optional parameters are malformed, we're better off bailing and telling the user
+    # than using a default and confusing them.
+    err = validator.validate(raw_query_params)
+    if err:
+        return bad_request(err)
+
+    start_date = validator.vals['obs_date__ge']
+    end_date = validator.vals['obs_date__le']
+    agg = validator.vals['agg']
+    geom = validator.get_geom()
+    dataset = MetaTable.get_by_dataset_name(dataset_name)
+
+    try:
+        ts = dataset.timeseries_one(agg_unit=agg, start=start_date,
+                                    end=end_date, geom=geom,
+                                    column_filters=validator.conditions)
+    except Exception as e:
+        return internal_error('Failed to construct timeseries', e)
+
+    datatype = validator.vals['data_type']
+    if datatype == 'json':
+        time_counts = [{'count': c, 'datetime': d} for c, d in ts[1:]]
+        resp = json_response_base(validator, time_counts)
+        resp['count'] = sum([c['count'] for c in time_counts])
+        resp = make_response(json.dumps(resp, default=dthandler), 200)
+        resp.headers['Content-Type'] = 'application/json'
+
+    elif datatype == 'csv':
+        resp = make_csv(ts)
+        resp.headers['Content-Type'] = 'text/csv'
+        filedate = datetime.now().strftime('%Y-%m-%d')
+        resp.headers['Content-Disposition'] = 'attachment; filename=%s.csv' % filedate
+
+    return resp
+
+
 @cache.cached(timeout=CACHE_TIMEOUT, key_prefix=make_cache_key)
 @crossdomain(origin="*")
 def detail():

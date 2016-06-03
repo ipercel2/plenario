@@ -93,10 +93,12 @@ class TestJobs(unittest.TestCase):
         """Establish that worker has done everything stated in the previous method,
         but this time with a message that's made it through the queue."""
 
-        job_id = enqueue_message(RANDOM_NAME, 'timeseries?obs_date__ge=2016-1-1')
+        job_id = enqueue_message(RANDOM_NAME, 'detail_aggregate?dataset_name=flu_shot_clinics&obs_date__ge=2016-1-1')
         submit_job_record('/jobs/', job_id)
+
         message = self.client.receive_message(QueueUrl=self.queue['QueueUrl'])['Messages'][0]
-        self.worker.post('/job', data=dict(title=message['MessageId'], text=message['Body']))
+
+        self.worker.get('/jobs/' + message['MessageId'] + '/' + message['Body'])
 
         job = Session.query(JobRecord).filter(JobRecord.id == job_id).first()
 
