@@ -17,6 +17,7 @@ from sqlalchemy.types import NullType
 from collections import OrderedDict
 
 from plenario.models import ShapeMetadata
+from jobs import jobable
 
 
 class ParamValidator(object):
@@ -502,8 +503,10 @@ def form_detail_sql_query(validator, aggregate_points=False):
 
     return q
 
+
 @cache.cached(timeout=CACHE_TIMEOUT, key_prefix=make_cache_key)
 @crossdomain(origin="*")
+@jobable
 def timeseries():
     validator = ParamValidator() \
         .set_optional('agg', agg_validator, 'week') \
@@ -582,8 +585,87 @@ def timeseries():
     return resp
 
 
+def timeseries_(args):
+    validator = ParamValidator() \
+        .set_optional('agg', agg_validator, 'week') \
+        .set_optional('data_type', make_format_validator(['json', 'csv']), 'json') \
+        .set_optional('dataset_name__in', list_of_datasets_validator, MetaTable.index) \
+        .set_optional('obs_date__ge', date_validator, datetime.now() - timedelta(days=90)) \
+        .set_optional('obs_date__le', date_validator, datetime.now()) \
+        .set_optional('location_geom__within', geom_validator, None) \
+        .set_optional('buffer', int_validator, 100)
+
+    err = validator.validate(args)
+    if err:
+        return bad_request(err)
+
+    geom = validator.get_geom()
+    table_names = validator.vals['dataset_name__in']
+    start_date = validator.vals['obs_date__ge']
+    end_date = validator.vals['obs_date__le']
+    agg = validator.vals['agg']
+
+    # Only examine tables that have a chance of containing records within the date and space boundaries.
+    try:
+        table_names = MetaTable.narrow_candidates(table_names, start_date, end_date, geom)
+    except Exception as e:
+        msg = 'Failed to gather candidate tables.'
+        return internal_error(msg, e)
+
+    try:
+        panel = MetaTable.timeseries_all(table_names=table_names,
+                                         agg_unit=agg,
+                                         start=start_date,
+                                         end=end_date,
+                                         geom=geom)
+    except Exception as e:
+        msg = 'Failed to construct timeseries.'
+        return internal_error(msg, e)
+
+    panel = MetaTable.attach_metadata(panel)
+    resp = json_response_base(validator, panel)
+
+    datatype = validator.vals['data_type']
+    if datatype == 'json':
+        resp = make_response(json.dumps(resp, default=dthandler), 200)
+        resp.headers['Content-Type'] = 'application/json'
+    elif datatype == 'csv':
+
+        # response format
+        # temporal_group,dataset_name_1,dataset_name_2
+        # 2014-02-24 00:00:00,235,653
+        # 2014-03-03 00:00:00,156,624
+
+        fields = ['temporal_group']
+        for o in resp['objects']:
+            fields.append(o['dataset_name'])
+
+        csv_resp = []
+        i = 0
+        for k,g in groupby(resp['objects'], key=itemgetter('dataset_name')):
+            l_g = list(g)[0]
+
+            j = 0
+            for row in l_g['items']:
+                # first iteration, populate the first column with temporal_groups
+                if i == 0:
+                    csv_resp.append([row['datetime']])
+                csv_resp[j].append(row['count'])
+                j += 1
+            i += 1
+
+        csv_resp.insert(0, fields)
+        csv_resp = make_csv(csv_resp)
+        resp = make_response(csv_resp, 200)
+        resp.headers['Content-Type'] = 'text/csv'
+        filedate = datetime.now().strftime('%Y-%m-%d')
+        resp.headers['Content-Disposition'] = 'attachment; filename=%s.csv' % filedate
+    return resp
+
+
 @cache.cached(timeout=CACHE_TIMEOUT, key_prefix=make_cache_key)
 @crossdomain(origin="*")
+@jobable
 def detail_aggregate():
     raw_query_params = request.args.copy()
     # First, make sure name of dataset was provided...
@@ -641,7 +723,7 @@ def detail_aggregate():
     return resp
 
 
-def detail_aggregate(args):
+def detail_aggregate_(args):
     raw_query_params = args.copy()
     # First, make sure name of dataset was provided...
     try:

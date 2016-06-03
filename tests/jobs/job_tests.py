@@ -25,6 +25,7 @@ class TestJobs(unittest.TestCase):
             QueueName=cls.queue_name,
             Attributes={'VisibilityTimeout': '0'}
         )
+        cls.queue_url = cls.queue['QueueUrl']
 
     # =============
     # TEST: get_job
@@ -49,7 +50,7 @@ class TestJobs(unittest.TestCase):
     # ==============
 
     def test_post_job_good_params(self):
-        response = self.app.post(prefix + '/jobs?datatype=timeseries&obs_date__ge=2016-1-1')
+        response = self.app.get(prefix + '/jobs?datatype=timeseries&obs_date__ge=2016-1-1')
         self.assertEqual(response.status, '200 OK')
 
     # =======================
@@ -68,8 +69,10 @@ class TestJobs(unittest.TestCase):
 
     def test_enqueue_message_good_params(self):
 
-        msg_id = enqueue_message(RANDOM_NAME, 'Hello!')
-        self.assertIsNotNone(msg_id)
+        enqueue_message(RANDOM_NAME, 'Hello!')
+        receipt_handle = self.client.receive_message(QueueUrl=self.queue_url)['Messages'][0]['ReceiptHandle']
+        self.assertIsNotNone(receipt_handle)
+        self.client.delete_message(QueueUrl=self.queue_url, ReceiptHandle=receipt_handle)
 
     # =====================
     # TEST: Worker Endpoint
@@ -104,8 +107,37 @@ class TestJobs(unittest.TestCase):
 
         self.assertIsNotNone(job.result)
 
+    # =======================
+    # TEST: jobable decorator
+    # =======================
+
+    def test_jobable_on_detail_aggregate(self):
+        """Establish that the jobbable decorator queued the appropriate message and
+        corresponding database JobRecord."""
+
+        # issue a request, exactly as a user would, to the timeseries endpoint
+        self.app.get('/v1/api/timeseries?dataset_name=flu_shot_clinics&obs_date__ge=2016-1-1&job=true')
+
+        # retrieve queued message and job record
+        message = self.client.receive_message(QueueUrl=self.queue['QueueUrl'])['Messages'][0]
+        job = Session.query(JobRecord).filter(JobRecord.id == message['MessageId']).first()
+
+        # stand in for EB, and send the job to Worker
+        self.worker.get('/jobs/' + message['MessageId'] + '/' + message['Body'])
+
+        # assert that both the message and job exist, and that they are the same
+        self.assertIsNotNone(message)
+        self.assertIsNotNone(job)
+        self.assertEquals(job.id, message['MessageId'])
+
+        # assert that the job returned with a successful result
+        self.assertIsNotNone(job.result)
+
+        # now check on your job!
+        response = self.app.get(job.url)
+
     @classmethod
     def tearDownClass(cls):
 
         # clean up test environment
-        cls.client.delete_queue(QueueUrl=cls.queue['QueueUrl'])
+        cls.client.delete_queue(QueueUrl=cls.queue_url)

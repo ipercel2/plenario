@@ -4,7 +4,7 @@ import plenario.tasks as tasks
 from flask import Flask, abort, request
 from multiprocessing import Process
 
-from plenario.api import detail_aggregate
+from plenario.api.point import detail_aggregate_, timeseries_
 from plenario.database import session as Session
 from plenario.models import JobRecord
 from plenario.tasks import celery_app
@@ -72,7 +72,8 @@ def execute(job_method, job_args):
     """
 
     methods = {
-        'detail_aggregate': detail_aggregate
+        'detail_aggregate': detail_aggregate_,
+        'timeseries': timeseries_
     }
 
     return methods[job_method](job_args)

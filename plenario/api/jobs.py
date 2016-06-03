@@ -26,7 +26,11 @@ def get_job(job_id):
 
     rp = Session.query(JobRecord).filter(JobRecord.id == job_id)
     job = rp.first()
-    return '200 OK: Job Results for:' + job.id + ':' + job.status
+
+    if job.status == 'completed':
+        return job.result
+    else:
+        return 'Job ID: ' + job.id + '\nJob Status:' + job.status
 
 
 def post_job():
@@ -59,17 +63,17 @@ def jobable(fn):
     :returns: decorated endpoint
     """
 
-    @wraps
-    def wrapper(*args, **kwargs):
+    @wraps(fn)
+    def wrapper():
         is_job = request.args.get('job')
-        query = request.full_path.split('?')[1]
+        query = request.full_path.split('/')[-1]
         if is_job:
             job_id = enqueue_message(MOCK_QUEUE, query)
             job_rec = submit_job_record('/v1/api/jobs/', job_id)
             # TODO: Replace with a template.
             return "Find your job at: " + job_rec.url
         else:
-            return fn(*args, **kwargs)
+            return fn()
     return wrapper
 
 
